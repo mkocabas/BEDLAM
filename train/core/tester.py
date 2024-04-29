@@ -1,6 +1,7 @@
 
 import os
 import cv2
+import joblib
 import torch
 import tqdm
 from loguru import logger
@@ -11,13 +12,15 @@ from torchvision.transforms import Normalize
 from glob import glob
 from train.utils.train_utils import load_pretrained_model
 from train.utils.vibe_image_utils import get_single_image_crop_demo
+from torch.utils.data import DataLoader
 
 from .config import update_hparams
 from ..models.hmr import HMR
 from ..models.head.smplx_cam_head import SMPLXCamHead
 from ..utils.renderer_cam import render_image_group
-from ..utils.renderer_pyrd import Renderer
+
 from ..utils.image_utils import crop
+from ..dataset.inference import Inference
 
 
 class Tester:
@@ -50,6 +53,27 @@ class Tester:
         load_pretrained_model(self.model, ckpt, overwrite_shape_mismatch=True, remove_lightning=True)
         logger.info(f'Loaded pretrained weights from \"{self.args.ckpt}\"')
 
+    def run_tracking(self, image_folder, min_num_frames=10):
+        # ========= Run tracking ========= #
+        logger.info(f'Running tracking on {image_folder}...')
+        # run multi object tracker
+        mot = MPT(
+            device=self.device,
+            batch_size=self.args.tracker_batch_size,
+            display=False,
+            detector_type=self.args.detector,
+            output_format='dict',
+            yolo_img_size=self.args.yolo_img_size,
+        )
+        tracking_results = mot(image_folder)
+
+        # remove tracklets if num_frames is less than MIN_NUM_FRAMES
+        for person_id in list(tracking_results.keys()):
+            if tracking_results[person_id]['frames'].shape[0] < min_num_frames:
+                del tracking_results[person_id]
+
+        return tracking_results
+    
     def run_detector(self, all_image_folder):
         # run multi object tracker
         mot = MPT(
@@ -75,7 +99,128 @@ class Tester:
                 self.bboxes_dict[fname] = bbox
 
     @torch.no_grad()
+    def run_on_video(self, image_folder, tracking_results, output_folder, save_results=True, render_results=False):
+        # ========= Run PARE on each person ========= #
+        logger.info(f'Running BEDLAM-CLIFF on each tracklet...')
+
+        for person_id in tqdm.tqdm(list(tracking_results.keys())):
+            bboxes = None
+
+            bboxes = tracking_results[person_id]['bbox']
+            frames = tracking_results[person_id]['frames']
+
+            dataset = Inference(
+                image_folder=image_folder,
+                frames=frames,
+                bboxes=bboxes,
+                crop_size=self.model_cfg.DATASET.IMG_RES,
+                return_dict=True,
+                normalize_fn=self.normalize_img,
+            )
+
+            bboxes = dataset.bboxes
+            frames = dataset.frames
+
+            dataloader = DataLoader(dataset, batch_size=self.args.batch_size, num_workers=8)
+
+            smplx_pose = []
+            smplx_betas = []
+            smplx_trans = []
+            cam_focal_l = []
+            imgnames = []
+            if render_results:
+                smplx_verts = []
+                
+            # cam_center = []
+            # smplx_joints = []
+            # smplx_verts = []
+
+            for batch in tqdm.tqdm(dataloader):
+                for k, v in batch.items():
+                    if isinstance(v, torch.Tensor):
+                        batch[k] = v.to(self.device)
+                        
+                batch_size = batch['img'].shape[0]
+                
+                hmr_output = self.model(
+                    batch['img'], bbox_center=batch['bbox_center'], bbox_scale=batch['bbox_scale'], 
+                    img_w=batch['img_w'], img_h=batch['img_h']
+                )
+
+                img_w = batch['img_w']
+                img_h = batch['img_h']
+                # img = batch['disp_img'].detach().cpu().numpy().transpose(1, 2, 0) * 255
+                
+                # pred_keypoints3d = hmr_output.joints[:,:24,:]
+                focal_length = (img_w * img_w + img_h * img_h) ** 0.5
+                camera_center = torch.hstack((img_w[:,None], img_h[:,None])) / 2
+                pred_pose = hmr_output['pred_pose']
+                pred_cam_t = hmr_output['pred_cam_t']
+                pred_betas = hmr_output['pred_shape']
+                pred_vertices = (
+                    hmr_output['vertices'] + hmr_output['pred_cam_t'].unsqueeze(1)
+                ).detach().cpu().numpy()
+            
+                if save_results:
+                    imgnames.extend(batch['imgname'])
+                    smplx_pose.extend(pred_pose.cpu().numpy())
+                    smplx_betas.extend(pred_betas.cpu().numpy())
+                    smplx_trans.extend(pred_cam_t.cpu().numpy())
+                    cam_focal_l.extend(focal_length.cpu().numpy())
+                    smplx_verts.extend(pred_vertices)
+
+            tracking_results[person_id].update({
+                'smplx_pose': np.array(smplx_pose),
+                'smplx_betas': np.array(smplx_betas),
+                'smplx_trans': np.array(smplx_trans),
+                'cam_focal_l': np.array(cam_focal_l),
+                'imgnames': imgnames,
+            })
+            if render_results:
+                tracking_results[person_id]['smplx_verts'] = np.array(smplx_verts)
+        
+        print(f'Saving BEDLAM-CLIFF results to {output_folder}...')
+        joblib.dump(tracking_results, os.path.join(output_folder, 'bedlam_cliff_results.pkl'))
+        
+        if render_results:
+            from ..utils.renderer_pyrd import Renderer
+            
+            renderer = Renderer(
+                focal_length=focal_length[0].item(), img_w=img_w[0].item(), img_h=img_h[0].item(),
+                faces=self.smplx_cam_head.smplx.faces,
+                same_mesh_color=False
+            )
+            render_save_dir = os.path.join(output_folder, 'renders')
+            os.makedirs(render_save_dir, exist_ok=True)
+            
+            for k, v in tracking_results.items():
+
+                print(f'Rendering tracklet {k}...')
+                for i in tqdm.tqdm(range(v['smplx_verts'].shape[0])):
+                    
+                    vertices = v['smplx_verts'][i]
+                    basename = os.path.basename(v['imgnames'][i])
+                    
+                    front_view_path = os.path.join(render_save_dir, basename)
+                    
+                    if os.path.isfile(front_view_path):
+                        imgname = front_view_path
+                    else:
+                        imgname = v['imgnames'][i]
+                        
+                    img = cv2.cvtColor(cv2.imread(imgname), cv2.COLOR_BGR2RGB)
+                    front_view = renderer.render_front_view(vertices[None], bg_img_rgb=img.copy())
+                    
+                    cv2.imwrite(front_view_path, front_view[:, :, ::-1])
+            
+            renderer.delete()
+            
+        return tracking_results
+    
+    @torch.no_grad()
     def run_on_image_folder(self, all_image_folder, detections, output_folder, visualize_proj=True):
+        from ..utils.renderer_pyrd import Renderer
+        
         for fold_idx, image_folder in enumerate(all_image_folder):
             image_file_names = [
                 os.path.join(image_folder, x)
@@ -83,7 +228,7 @@ class Tester:
                 if x.endswith('.png') or x.endswith('.jpg') or x.endswith('.jpeg')
             ]
             image_file_names = (sorted(image_file_names))
-            for img_idx, img_fname in tqdm.tqdm(enumerate(image_file_names)):
+            for img_idx, img_fname in enumerate(tqdm.tqdm(image_file_names)):
                 
                 dets = detections[fold_idx][img_idx]
                 if len(dets) < 1:
@@ -122,20 +267,41 @@ class Tester:
                                     same_mesh_color=False)
                 front_view = renderer.render_front_view(pred_vertices_array,
                                                         bg_img_rgb=img.copy())
+                
+                
+                pred_pose = hmr_output['pred_pose'].cpu().numpy()
+                pred_cam_t = hmr_output['pred_cam_t'].cpu().numpy()
+                pred_betas = hmr_output['pred_shape'].cpu().numpy()
+                
+                result_dict = {
+                    'bbox': dets,
+                    'smplx_pose': pred_pose,
+                    'smplx_betas': pred_betas,
+                    'smplx_trans': pred_cam_t,
+                    'cam_focal_l': focal_length.cpu().numpy(),
+                    'imgnames': img_fname,
+                    'img_w': img_w.cpu().numpy(),
+                    'img_h': img_h.cpu().numpy(),
+                }
 
                 # save rendering results
                 basename = img_fname.split('/')[-1]
-                filename = basename + "pred_%s.jpg" % 'bedlam'
-                filename_orig = basename + "orig_%s.jpg" % 'bedlam'
+                basename = basename.replace('.png', '').replace('.jpg', '')
+                
+                joblib.dump(result_dict, os.path.join(output_folder, f'{basename}.pkl'))
+                
+                filename = basename + "_pred_%s.jpg" % 'bedlam'
+                # filename_orig = basename + "orig_%s.jpg" % 'bedlam'
                 front_view_path = os.path.join(output_folder, filename)
-                orig_path = os.path.join(output_folder, filename_orig)
-                logger.info(f'Writing output files to {output_folder}')
+                # orig_path = os.path.join(output_folder, filename_orig)
+                # logger.info(f'Writing output files to {output_folder}')
                 cv2.imwrite(front_view_path, front_view[:, :, ::-1])
-                cv2.imwrite(orig_path, img[:, :, ::-1])
+                # cv2.imwrite(orig_path, img[:, :, ::-1])
                 renderer.delete()
 
     @torch.no_grad()
     def run_on_hbw_folder(self, all_image_folder, detections, output_folder, data_split='test', visualize_proj=True):
+        from ..utils.renderer_pyrd import Renderer
         img_names = []
         verts = []
         image_file_names = []
@@ -218,6 +384,7 @@ class Tester:
         np.savez(os.path.join(output_folder, data_split + '_hbw_prediction.npz'), image_name=img_names, v_shaped=verts)
                
     def run_on_dataframe(self, dataframe_path, output_folder, visualize_proj=True):
+        from ..utils.renderer_pyrd import Renderer
         dataframe = np.load(dataframe_path)
         centers = dataframe['center']
         scales = dataframe['scale']

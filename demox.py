@@ -5,7 +5,7 @@ from loguru import logger
 from glob import glob
 from train.core.testerx import Tester
 
-os.environ['PYOPENGL_PLATFORM'] = 'egl'
+# os.environ['PYOPENGL_PLATFORM'] = 'egl'
 sys.path.append('')
 
 def main(args):

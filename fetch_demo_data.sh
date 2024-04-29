@@ -3,10 +3,10 @@ urle () { [[ "${1}" ]] || return 1; local LANG=C i x; for (( i = 0; i < ${#1}; i
 
 # SMPL-X model
 echo -e "\nYou need to register at https://smpl-x.is.tue.mpg.de"
-read -p "Username (SMPL-X):" username
-read -p "Password (SMPL-X):" password
-username=$(urle $username)
-password=$(urle $password)
+# read -p "Username (SMPL-X):" username
+# read -p "Password (SMPL-X):" password
+username=muhammed.kocabas@tuebingen.mpg.de # $(urle $username)
+password=Merve2000 # $(urle $password)
 
 mkdir -p data/body_models
 wget --post-data "username=$username&password=$password" 'https://download.is.tue.mpg.de/download.php?domain=smplx&sfile=models_smplx_v1_1.zip' -O './data/body_models/smplx.zip' --no-check-certificate --continue
@@ -14,10 +14,10 @@ unzip data/body_models/smplx.zip -d data/body_models/smplx
 
 # # MANO model
 echo -e "\nYou need to register at https://mano.is.tue.mpg.de"
-read -p "Username (MANO):" username
-read -p "Password (MANO):" password
-username=$(urle $username)
-password=$(urle $password)
+# read -p "Username (MANO):" username
+# read -p "Password (MANO):" password
+username=kocabasmuhammed@gmail.com # $(urle $username)
+password=Merve2000 # $(urle $password)
 
 mkdir -p data/body_models
 wget --post-data "username=$username&password=$password" 'https://download.is.tue.mpg.de/download.php?domain=mano&resume=1&sfile=mano_v1_2.zip' -O './data/body_models/mano.zip' --no-check-certificate --continue
@@ -26,10 +26,10 @@ unzip data/body_models/mano.zip -d data/body_models/mano
 
 # BEDLAM checkpoints
 echo -e "\nYou need to register at https://bedlam.is.tue.mpg.de/"
-read -p "Username (BEDLAM):" username
-read -p "Password (BEDLAM):" password
-username=$(urle $username)
-password=$(urle $password)
+# read -p "Username (BEDLAM):" username
+# read -p "Password (BEDLAM):" password
+username=merve.kocabas@metu.edu.tr # $(urle $username)
+password=5Kdt9hsM # $(urle $password)
 
 mkdir -p data/ckpt
 wget --post-data "username=$username&password=$password" 'https://download.is.tue.mpg.de/download.php?domain=bedlam&resume=1&sfile=checkpoints/bedlam_cliff.ckpt' -O './data/ckpt/bedlam_cliff.ckpt' --no-check-certificate --continue

@@ -1,11 +1,12 @@
 import os
 import sys
 import argparse
+import joblib
 from loguru import logger
 from glob import glob
 from train.core.tester import Tester
 
-os.environ['PYOPENGL_PLATFORM'] = 'egl'
+# os.environ['PYOPENGL_PLATFORM'] = 'egl'
 sys.path.append('')
 
 
@@ -32,6 +33,15 @@ def main(args):
     elif args.eval_dataset == 'ssp':
         dataframe_path = args.dataframe_path
         tester.run_on_dataframe(dataframe_path, output_path, args.display)
+    elif args.eval_dataset == 'video':
+        mpt_res_path = os.path.join(output_path, 'mpt_results.pkl')
+        if os.path.exists(mpt_res_path):
+            logger.info('Loading tracking results from cache', mpt_res_path)
+            tracking_results = joblib.load(mpt_res_path)
+        else:
+            tracking_results = tester.run_tracking(input_image_folder)
+            joblib.dump(tracking_results, os.path.join(output_path, 'mpt_results.pkl'))
+        tester.run_on_video(input_image_folder, tracking_results, args.output_folder, render_results=args.enable_render)
     else:
         all_image_folder = [input_image_folder]
         detections = tester.run_detector(all_image_folder)
@@ -57,6 +67,9 @@ if __name__ == '__main__':
     parser.add_argument('--output_folder', type=str, default='demo_images/results',
                         help='output folder to write results')
 
+    parser.add_argument('--batch_size', type=int, default=16,
+                        help='batch size for inference')
+    
     parser.add_argument('--tracker_batch_size', type=int, default=1,
                         help='batch size of object detector used for bbox tracking')
                         
@@ -71,6 +84,7 @@ if __name__ == '__main__':
     parser.add_argument('--eval_dataset', type=str, default=None)
     parser.add_argument('--dataframe_path', type=str, default='data/ssp_3d_test.npz')
     parser.add_argument('--data_split', type=str, default='test')
+    parser.add_argument('--enable_render', action='store_true')
 
     args = parser.parse_args()
     main(args)
