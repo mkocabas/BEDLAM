@@ -218,7 +218,7 @@ class Tester:
         return tracking_results
     
     @torch.no_grad()
-    def run_on_image_folder(self, all_image_folder, detections, output_folder, visualize_proj=True):
+    def run_on_image_folder(self, all_image_folder, detections, output_folder, visualize_proj=True, render_results=False):
         from ..utils.renderer_pyrd import Renderer
         
         for fold_idx, image_folder in enumerate(all_image_folder):
@@ -262,11 +262,7 @@ class Tester:
 
                 focal_length = (img_w * img_w + img_h * img_h) ** 0.5
                 pred_vertices_array = (hmr_output['vertices'] + hmr_output['pred_cam_t'].unsqueeze(1)).detach().cpu().numpy()
-                renderer = Renderer(focal_length=focal_length[0], img_w=img_w[0], img_h=img_h[0],
-                                    faces=self.smplx_cam_head.smplx.faces,
-                                    same_mesh_color=False)
-                front_view = renderer.render_front_view(pred_vertices_array,
-                                                        bg_img_rgb=img.copy())
+                
                 
                 
                 pred_pose = hmr_output['pred_pose'].cpu().numpy()
@@ -289,15 +285,21 @@ class Tester:
                 basename = basename.replace('.png', '').replace('.jpg', '')
                 
                 joblib.dump(result_dict, os.path.join(output_folder, f'{basename}.pkl'))
-                
-                filename = basename + "_pred_%s.jpg" % 'bedlam'
-                # filename_orig = basename + "orig_%s.jpg" % 'bedlam'
-                front_view_path = os.path.join(output_folder, filename)
-                # orig_path = os.path.join(output_folder, filename_orig)
-                # logger.info(f'Writing output files to {output_folder}')
-                cv2.imwrite(front_view_path, front_view[:, :, ::-1])
-                # cv2.imwrite(orig_path, img[:, :, ::-1])
-                renderer.delete()
+                if render_results:
+                    renderer = Renderer(focal_length=focal_length[0], img_w=img_w[0], img_h=img_h[0],
+                                        faces=self.smplx_cam_head.smplx.faces,
+                                        same_mesh_color=False)
+                    front_view = renderer.render_front_view(pred_vertices_array,
+                                                            bg_img_rgb=img.copy())
+                    
+                    filename = basename + "_pred_%s.jpg" % 'bedlam'
+                    # filename_orig = basename + "orig_%s.jpg" % 'bedlam'
+                    front_view_path = os.path.join(output_folder, filename)
+                    # orig_path = os.path.join(output_folder, filename_orig)
+                    # logger.info(f'Writing output files to {output_folder}')
+                    cv2.imwrite(front_view_path, front_view[:, :, ::-1])
+                    # cv2.imwrite(orig_path, img[:, :, ::-1])
+                    renderer.delete()
 
     @torch.no_grad()
     def run_on_hbw_folder(self, all_image_folder, detections, output_folder, data_split='test', visualize_proj=True):

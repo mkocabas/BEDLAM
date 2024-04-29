@@ -45,7 +45,7 @@ def main(args):
     else:
         all_image_folder = [input_image_folder]
         detections = tester.run_detector(all_image_folder)
-        tester.run_on_image_folder(all_image_folder, detections, output_path, args.display)
+        tester.run_on_image_folder(all_image_folder, detections, output_path, args.display, render_results=args.enable_render)
 
     del tester.model
 
