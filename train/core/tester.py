@@ -99,10 +99,13 @@ class Tester:
                 self.bboxes_dict[fname] = bbox
 
     @torch.no_grad()
-    def run_on_video(self, image_folder, tracking_results, output_folder, save_results=True, render_results=False):
+    def run_on_video(self, image_folder, tracking_results, output_folder, 
+                     save_results=True, render_results=False, cam_intrinsics_file=None):
         # ========= Run PARE on each person ========= #
         logger.info(f'Running BEDLAM-CLIFF on each tracklet...')
 
+        cam_intrinsics = np.loadtxt(cam_intrinsics_file) if cam_intrinsics_file is not None else None
+        
         for person_id in tqdm.tqdm(list(tracking_results.keys())):
             bboxes = None
 
@@ -128,12 +131,10 @@ class Tester:
             smplx_trans = []
             cam_focal_l = []
             imgnames = []
+            cam_center = []
+            cam_weak_persp = []
             if render_results:
                 smplx_verts = []
-                
-            # cam_center = []
-            # smplx_joints = []
-            # smplx_verts = []
 
             for batch in tqdm.tqdm(dataloader):
                 for k, v in batch.items():
@@ -142,18 +143,24 @@ class Tester:
                         
                 batch_size = batch['img'].shape[0]
                 
-                hmr_output = self.model(
-                    batch['img'], bbox_center=batch['bbox_center'], bbox_scale=batch['bbox_scale'], 
-                    img_w=batch['img_w'], img_h=batch['img_h']
-                )
-
                 img_w = batch['img_w']
                 img_h = batch['img_h']
-                # img = batch['disp_img'].detach().cpu().numpy().transpose(1, 2, 0) * 255
                 
-                # pred_keypoints3d = hmr_output.joints[:,:24,:]
-                focal_length = (img_w * img_w + img_h * img_h) ** 0.5
-                camera_center = torch.hstack((img_w[:,None], img_h[:,None])) / 2
+                if cam_intrinsics is not None:
+                    focal_length = torch.tensor([(cam_intrinsics[0], cam_intrinsics[1])]*batch_size).to(batch['img'])
+                    camera_center = torch.tensor([(cam_intrinsics[2], cam_intrinsics[3])]*batch_size).to(batch['img'])
+                    batch['img_w'] = camera_center[:, 0] * 2.0
+                    batch['img_h'] = camera_center[:, 1] * 2.0
+                else:
+                    focal_length = (img_w * img_w + img_h * img_h) ** 0.5
+                    focal_length = focal_length.repeat(2).view(batch_size, 2)
+                    camera_center = torch.hstack((img_w[:,None], img_h[:,None])) / 2
+                
+                hmr_output = self.model(
+                    batch['img'], bbox_center=batch['bbox_center'], bbox_scale=batch['bbox_scale'], 
+                    img_w=batch['img_w'], img_h=batch['img_h'], fl=focal_length,
+                )
+
                 pred_pose = hmr_output['pred_pose']
                 pred_cam_t = hmr_output['pred_cam_t']
                 pred_betas = hmr_output['pred_shape']
@@ -168,12 +175,16 @@ class Tester:
                     smplx_trans.extend(pred_cam_t.cpu().numpy())
                     cam_focal_l.extend(focal_length.cpu().numpy())
                     smplx_verts.extend(pred_vertices)
-
+                    cam_center.extend(camera_center.cpu().numpy())
+                    cam_weak_persp.extend(hmr_output['pred_cam'].cpu().numpy())
+                
             tracking_results[person_id].update({
                 'smplx_pose': np.array(smplx_pose),
                 'smplx_betas': np.array(smplx_betas),
                 'smplx_trans': np.array(smplx_trans),
                 'cam_focal_l': np.array(cam_focal_l),
+                'cam_center': np.array(cam_center),
+                'cam_weak_persp': np.array(cam_weak_persp),
                 'imgnames': imgnames,
             })
             if render_results:
@@ -186,7 +197,7 @@ class Tester:
             from ..utils.renderer_pyrd import Renderer
             
             renderer = Renderer(
-                focal_length=focal_length[0].item(), img_w=img_w[0].item(), img_h=img_h[0].item(),
+                focal_length=focal_length[0, 0].item(), img_w=img_w[0].item(), img_h=img_h[0].item(),
                 faces=self.smplx_cam_head.smplx.faces,
                 same_mesh_color=False
             )

@@ -41,7 +41,13 @@ def main(args):
         else:
             tracking_results = tester.run_tracking(input_image_folder)
             joblib.dump(tracking_results, os.path.join(output_path, 'mpt_results.pkl'))
-        tester.run_on_video(input_image_folder, tracking_results, args.output_folder, render_results=args.enable_render)
+        tester.run_on_video(
+            input_image_folder, 
+            tracking_results, 
+            args.output_folder, 
+            render_results=args.enable_render,
+            cam_intrinsics_file=args.cam_intrinsics
+        )
     else:
         all_image_folder = [input_image_folder]
         detections = tester.run_detector(all_image_folder)
@@ -72,6 +78,8 @@ if __name__ == '__main__':
     
     parser.add_argument('--tracker_batch_size', type=int, default=1,
                         help='batch size of object detector used for bbox tracking')
+    
+    parser.add_argument('--cam_intrinsics', type=str, default=None, help='camera intrinsics file')
                         
     parser.add_argument('--display', action='store_true',
                         help='visualize the 3d body projection on image')
