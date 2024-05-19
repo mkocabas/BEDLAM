@@ -9,13 +9,17 @@ import cv2
 
 class Renderer(object):
 
-    def __init__(self, focal_length=600, img_w=512, img_h=512, faces=None,
-                 same_mesh_color=False):
+    def __init__(self, focal_length=600, img_w=512, img_h=512, camera_center=None, 
+                 faces=None, same_mesh_color=False):
         # os.environ['PYOPENGL_PLATFORM'] = 'egl'
         self.renderer = pyrender.OffscreenRenderer(viewport_width=img_w,
                                                    viewport_height=img_h,
                                                    point_size=1.0)
-        self.camera_center = [img_w // 2, img_h // 2]
+        if camera_center is None:
+            self.camera_center = [img_w // 2, img_h // 2]
+        else:
+            self.camera_center = camera_center
+            
         self.focal_length = focal_length
         self.faces = faces
         self.same_mesh_color = same_mesh_color

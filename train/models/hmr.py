@@ -73,32 +73,32 @@ class HMR(nn.Module):
             images,
             bbox_scale=None,
             bbox_center=None,
-            img_w=None,
-            img_h=None,
-            fl=None
+            cam_intrinsics=None,
     ):
         batch_size = images.shape[0]
 
-        if fl is not None:
-            # GT focal length
-            focal_length = fl
-        else:
-            # Estimate focal length
-            focal_length = (img_w * img_w + img_h * img_h) ** 0.5
-            focal_length = focal_length.repeat(2).view(batch_size, 2)
+        # if fl is not None:
+        #     # GT focal length
+        #     focal_length = fl
+        # else:
+        #     # Estimate focal length
+        #     focal_length = (img_w * img_w + img_h * img_h) ** 0.5
+        #     focal_length = focal_length.repeat(2).view(batch_size, 2)
 
         # Initialze cam intrinsic matrix
-        cam_intrinsics = torch.eye(3).repeat(batch_size, 1, 1).cuda().float()
-        cam_intrinsics[:, 0, 0] = focal_length[:, 0]
-        cam_intrinsics[:, 1, 1] = focal_length[:, 1]
-        cam_intrinsics[:, 0, 2] = img_w/2.
-        cam_intrinsics[:, 1, 2] = img_h/2.
-
+        # cam_intrinsics = torch.eye(3).repeat(batch_size, 1, 1).cuda().float()
+        # cam_intrinsics[:, 0, 0] = focal_length[:, 0]
+        # cam_intrinsics[:, 1, 1] = focal_length[:, 1]
+        # cam_intrinsics[:, 0, 2] = img_w/2.
+        # cam_intrinsics[:, 1, 2] = img_h/2.
+        
+        cam_center_x = cam_intrinsics[:, 0, 2]
+        cam_center_y = cam_intrinsics[:, 1, 2]
         if self.hparams.TRIAL.bedlam_bbox:
             # Taken from CLIFF repository
             cx, cy = bbox_center[:, 0], bbox_center[:, 1]
             b = bbox_scale * 200
-            bbox_info = torch.stack([cx - img_w / 2., cy - img_h / 2., b],
+            bbox_info = torch.stack([cx - cam_center_x, cy - cam_center_y, b],
                                     dim=-1)
             bbox_info[:, :2] = bbox_info[:, :2] / cam_intrinsics[:, 0, 0].unsqueeze(-1)   # [-1, 1]
             bbox_info[:, 2] = bbox_info[:, 2] / cam_intrinsics[:, 0, 0]  # [-1, 1]
@@ -115,11 +115,9 @@ class HMR(nn.Module):
                 rotmat=hmr_output['pred_pose'],
                 shape=hmr_output['pred_shape'],
                 cam=hmr_output['pred_cam'],
-                cam_intrinsics=cam_intrinsics,
                 bbox_scale=bbox_scale,
                 bbox_center=bbox_center,
-                img_w=img_w,
-                img_h=img_h,
+                cam_intrinsics=cam_intrinsics,
                 normalize_joints2d=False,
             )
         else:

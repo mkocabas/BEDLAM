@@ -14,9 +14,7 @@ class SMPLXCamHead(nn.Module):
         self.img_res = img_res
 
     def forward(self, rotmat, shape, cam, cam_intrinsics,
-                bbox_scale, bbox_center, img_w, img_h,
-                normalize_joints2d=False, trans=False, trans2=False,
-                learned_scale=None):
+                bbox_scale, bbox_center, normalize_joints2d=False,):
 
         smpl_output = self.smplx(
             betas=shape,
@@ -33,14 +31,12 @@ class SMPLXCamHead(nn.Module):
         joints3d = output['joints3d']
         batch_size = joints3d.shape[0]
         device = joints3d.device
-
+        
         cam_t = convert_pare_to_full_img_cam(
             pare_cam=cam,
             bbox_height=bbox_scale * 200.,
             bbox_center=bbox_center,
-            img_w=img_w,
-            img_h=img_h,
-            focal_length=cam_intrinsics[:, 0, 0],
+            cam_intrinsics=cam_intrinsics,
             crop_res=self.img_res,
         )
 
@@ -70,17 +66,19 @@ def perspective_projection(points, rotation, translation, cam_intrinsics):
     return projected_points[:, :, :-1]
 
 
-def convert_pare_to_full_img_cam(
-        pare_cam, bbox_height, bbox_center,
-        img_w, img_h, focal_length, crop_res=224):
+def convert_pare_to_full_img_cam(pare_cam, bbox_height, bbox_center, cam_intrinsics, crop_res=224):
 
+    focal_length = cam_intrinsics[:, 0, 0]
+    cam_center_x = cam_intrinsics[:, 0, 2]
+    cam_center_y = cam_intrinsics[:, 1, 2]
+    
     s, tx, ty = pare_cam[:, 0], pare_cam[:, 1], pare_cam[:, 2]
-    res = 224
+    res = crop_res
     r = bbox_height / res
     tz = 2 * focal_length / (r * res * s)
 
-    cx = 2 * (bbox_center[:, 0] - (img_w / 2.)) / (s * bbox_height)
-    cy = 2 * (bbox_center[:, 1] - (img_h / 2.)) / (s * bbox_height)
+    cx = 2 * (bbox_center[:, 0] - cam_center_x) / (s * bbox_height)
+    cy = 2 * (bbox_center[:, 1] - cam_center_y) / (s * bbox_height)
 
     cam_t = torch.stack([tx + cx, ty + cy, tz], dim=-1)
 
