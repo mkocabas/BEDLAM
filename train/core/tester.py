@@ -7,7 +7,7 @@ import tqdm
 from loguru import logger
 import numpy as np
 from . import constants
-from multi_person_tracker import MPT
+# from multi_person_tracker import MPT
 from torchvision.transforms import Normalize
 from glob import glob
 from train.utils.train_utils import load_pretrained_model
@@ -21,6 +21,8 @@ from ..utils.renderer_cam import render_image_group
 
 from ..utils.image_utils import crop
 from ..dataset.inference import Inference
+
+from ..utils.mpt.mpt import MPT
 
 
 class Tester:
@@ -268,8 +270,12 @@ class Tester:
 
                 for det_idx, det in enumerate(dets):
                     bbox = det
-                    bbox_scale.append(bbox[2] / 200.)
-                    bbox_center.append([bbox[0], bbox[1]])
+                    x, y, w, h = bbox
+                    sc = np.where(w / h > 1, w, h)
+                    bbox_scale.append(sc / 200.)
+                    bbox_center.append([x + w / 2., y + h / 2.])
+                    # bbox_scale.append(bbox[2] / 200.)
+                    # bbox_center.append([bbox[0], bbox[1]])
                     rgb_img = crop(img, bbox_center[-1], bbox_scale[-1],[self.model_cfg.DATASET.IMG_RES, self.model_cfg.DATASET.IMG_RES])
                     rgb_img = np.transpose(rgb_img.astype('float32'), (2, 0, 1)) / 255.0
                     rgb_img = torch.from_numpy(rgb_img)

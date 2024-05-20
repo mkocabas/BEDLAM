@@ -54,9 +54,14 @@ class Inference(Dataset):
         
         orig_height, orig_width = img.shape[:2]
         
-        bbox = self.bboxes[idx]
-        bbox_scale = bbox[2] / 200.
-        bbox_center = bbox[:2]
+        bbox = self.bboxes[idx] # x, y, w, h
+        x, y, w, h = bbox
+        sc = np.where(w / h > 1, w, h)
+        bbox_scale = sc / 200.
+        bbox_center = np.array([x + w / 2., y + h / 2.])
+        
+        # bbox_scale = bbox[2] / 200.
+        # bbox_center = bbox[:2]
         
         rgb_img = crop(
             img, 
