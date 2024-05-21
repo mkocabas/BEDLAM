@@ -4,6 +4,8 @@ import argparse
 import joblib
 from loguru import logger
 from glob import glob
+
+import numpy as np
 from train.core.tester import Tester
 
 # os.environ['PYOPENGL_PLATFORM'] = 'egl'
@@ -34,13 +36,25 @@ def main(args):
         dataframe_path = args.dataframe_path
         tester.run_on_dataframe(dataframe_path, output_path, args.display)
     elif args.eval_dataset == 'video':
+        
         mpt_res_path = os.path.join(output_path, 'mpt_results.pkl')
-        if os.path.exists(mpt_res_path):
-            logger.info('Loading tracking results from cache', mpt_res_path)
-            tracking_results = joblib.load(mpt_res_path)
+        if args.bbox_file is not None:
+            bboxes = np.loadtxt(args.bbox_file)
+            tracking_results = {
+                1: {
+                    'bbox': bboxes,
+                    'frames': np.arange(len(bboxes)),
+                },
+            }
+            joblib.dump(tracking_results, mpt_res_path)
         else:
-            tracking_results = tester.run_tracking(input_image_folder)
-            joblib.dump(tracking_results, os.path.join(output_path, 'mpt_results.pkl'))
+            if os.path.exists(mpt_res_path):
+                logger.info('Loading tracking results from cache', mpt_res_path)
+                tracking_results = joblib.load(mpt_res_path)
+            else:
+                tracking_results = tester.run_tracking(input_image_folder)
+                joblib.dump(tracking_results, os.path.join(output_path, 'mpt_results.pkl'))
+                
         tester.run_on_video(
             input_image_folder, 
             tracking_results, 
@@ -80,6 +94,8 @@ if __name__ == '__main__':
                         help='batch size of object detector used for bbox tracking')
     
     parser.add_argument('--cam_intrinsics', type=str, default=None, help='camera intrinsics file')
+    
+    parser.add_argument('--bbox_file', type=str, default=None, help='bbox file')
                         
     parser.add_argument('--display', action='store_true',
                         help='visualize the 3d body projection on image')
